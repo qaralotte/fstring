@@ -2,13 +2,14 @@ package io.qaralotte.meru.processor;
 
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeTranslator;
-import com.sun.tools.javac.util.*;
+import com.sun.tools.javac.util.List;
 import io.qaralotte.meru.annotation.EnableFormat;
 
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
+import javax.tools.Diagnostic;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -17,7 +18,12 @@ import java.util.regex.Pattern;
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
 public class FormatProcessor extends BaseProcessor {
 
-    private JCTree.JCExpression format(String lit) {
+    /**
+     * 格式化字符串
+     * @param lit 需要格式化的字符串，其中 {} 内的需要处理成表达式
+     * @return 生成正确的表达式
+     */
+    private JCTree.JCExpression formatStringLiteral(String lit) {
         // 找出所有 {} 之内的字符串
         Matcher matcher = Pattern.compile("\\{.*?}").matcher(lit);
         int lastEnd = 0;
@@ -56,14 +62,49 @@ public class FormatProcessor extends BaseProcessor {
         }
 
         // 在最后可能还有字符串，需要再添加进来
-        lastAddExpression = treeMaker.Binary(
-                JCTree.Tag.PLUS,
-                lastAddExpression,
-                treeMaker.Literal(lit.substring(lastEnd))
-        );
+        if (lastEnd < lit.length()) {
+            lastAddExpression = treeMaker.Binary(
+                    JCTree.Tag.PLUS,
+                    lastAddExpression,
+                    treeMaker.Literal(lit.substring(lastEnd))
+            );
+        }
 
         return lastAddExpression;
     }
+
+    private JCTree.JCExpression handleArg(JCTree.JCExpression arg) {
+        switch (arg.getKind()) {
+            case PLUS:
+                // 众所周知，两个字符串字面量相加一定会被javac整合在一起变成一个字面量
+                // 所以出现在这里的一定是(变量 or 表达式) + (字面量 or 变量 or 表达式)
+                //       root
+                //      /    \
+                //     l      r
+                //    / \
+                //   l   r
+
+                JCTree.JCBinary jcBinary = (JCTree.JCBinary) arg;
+                return treeMaker.Binary(
+                        JCTree.Tag.PLUS,
+                        handleArg(jcBinary.lhs),
+                        handleArg(jcBinary.rhs)
+                );
+            case STRING_LITERAL:
+                // 字面量
+                JCTree.JCLiteral jcLiteral = (JCTree.JCLiteral) arg;
+                return formatStringLiteral(jcLiteral.value.toString());
+            case IDENTIFIER:
+                // 变量
+            case METHOD_INVOCATION:
+                // 调用方法
+                return arg;
+            default:
+                messager.printMessage(Diagnostic.Kind.ERROR, "不支持的类型: " + arg.getKind());
+                return null;
+        }
+    }
+
 
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
@@ -81,18 +122,8 @@ public class FormatProcessor extends BaseProcessor {
                         "StringUtils.format".equals(select.toString())) {
 
                         // 只有一个参数，而且必须是 String 类型
-                        final JCTree.JCExpression[] expression = {null};
-                        methodInvocation.args.get(0).accept(new TreeTranslator() {
-                            @Override
-                            public void visitLiteral(JCTree.JCLiteral jcLiteral) {
-
-                                expression[0] = format(jcLiteral.value.toString());
-
-                                super.visitLiteral(jcLiteral);
-                            }
-                        });
-
-                        methodInvocation.args = List.of(expression[0]);
+                        JCTree.JCExpression argExpr = methodInvocation.args.get(0);
+                        methodInvocation.args = List.of(handleArg(argExpr));
                     }
 
                     super.visitApply(methodInvocation);
