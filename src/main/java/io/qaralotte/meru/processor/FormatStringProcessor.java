@@ -3,12 +3,12 @@ package io.qaralotte.meru.processor;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.expr.*;
-import com.sun.tools.javac.code.TypeTag;
+import com.sun.source.tree.Tree;
 import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeTranslator;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.ListBuffer;
-import io.qaralotte.meru.annotation.EnableFormat;
+import io.qaralotte.meru.annotation.FormatString;
 
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
@@ -20,9 +20,9 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-@SupportedAnnotationTypes("io.qaralotte.meru.annotation.EnableFormat")
+@SupportedAnnotationTypes("io.qaralotte.meru.annotation.FormatString")
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
-public class FormatProcessor extends BaseProcessor {
+public class FormatStringProcessor extends BaseProcessor {
 
     /*
       1            -> 整数
@@ -69,9 +69,9 @@ public class FormatProcessor extends BaseProcessor {
     }
 
     /**
-     * 处理表达式对象
+     * 分开处理表达式对象
      * @param expression 表达式对象
-     * @return 表达式 ast
+     * @return 表达式 ast.node
      */
     private JCTree.JCExpression parseExpression(Expression expression) {
 
@@ -154,9 +154,9 @@ public class FormatProcessor extends BaseProcessor {
     }
 
     /**
-     * 处理表达式字符串生成 ast
+     * 处理表达式字符串
      * @param exprStr 表达式字符串
-     * @return 表达式 ast
+     * @return 表达式 ast.node
      */
     private JCTree.JCExpression parseExpressionString(String exprStr) {
 
@@ -169,14 +169,14 @@ public class FormatProcessor extends BaseProcessor {
             return parseExpression(expr);
         } else {
             messager.printMessage(Diagnostic.Kind.ERROR, exprStr + " 不是一个正确的 java 表达式");
+            return null;
         }
-        return null;
     }
 
     /**
-     * 格式化字符串
-     * @param lit 需要格式化的字符串，其中 {} 内的需要处理成表达式
-     * @return 生成正确的表达式
+     * 处理模版字符串
+     * @param lit 需要格式化的字符串，{} 内的字符串需要处理成表达式 (parseExpressionString)
+     * @return 表达式 ast.node
      */
     private JCTree.JCExpression parseFormatString(String lit) {
 
@@ -226,79 +226,44 @@ public class FormatProcessor extends BaseProcessor {
 
         // 在最后可能还有字符串，需要再添加进来
         if (lastEnd < lit.length()) {
-            resultExpression = treeMaker.Binary(
-                    JCTree.Tag.PLUS,
-                    resultExpression,
-                    treeMaker.Literal(lit.substring(lastEnd))
-            );
+            if (resultExpression == null) {
+                resultExpression = treeMaker.Literal(lit.substring(lastEnd));
+            } else {
+                resultExpression = treeMaker.Binary(
+                        JCTree.Tag.PLUS,
+                        resultExpression,
+                        treeMaker.Literal(lit.substring(lastEnd))
+                );
+            }
         }
 
         return resultExpression;
     }
 
-    /**
-     * 处理参数类型
-     * @param arg 参数
-     * @return 格式的表达式
-     */
-    private JCTree.JCExpression parseArg(JCTree.JCExpression arg) {
-        switch (arg.getKind()) {
-            case PLUS:
-                // 众所周知，两个字符串字面量相加一定会被javac整合在一起变成一个字面量
-                // 所以出现在这里的一定是(变量 or 表达式) + (字面量 or 变量 or 表达式)
-                //       root
-                //      /    \
-                //     l      r
-                //    / \
-                //   l   r
-
-                JCTree.JCBinary jcBinary = (JCTree.JCBinary) arg;
-                return treeMaker.Binary(
-                        JCTree.Tag.PLUS,
-                        parseArg(jcBinary.lhs),
-                        parseArg(jcBinary.rhs)
-                );
-            case STRING_LITERAL:
-                // 字面量
-                JCTree.JCLiteral jcLiteral = (JCTree.JCLiteral) arg;
-                return parseFormatString(jcLiteral.value.toString());
-            case IDENTIFIER:
-                // 变量
-            case METHOD_INVOCATION:
-                // 调用方法
-                return arg;
-            case NULL_LITERAL:
-                // null
-                return treeMaker.Literal(TypeTag.BOT, null);
-            default:
-                messager.printMessage(Diagnostic.Kind.ERROR, "不支持的类型: " + arg.getKind());
-                return null;
-        }
-    }
-
-
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
 
-        // 处理有 @EnableFormat 注解的元素
-        for (Element element : roundEnv.getElementsAnnotatedWith(EnableFormat.class)) {
+        // 处理有 @FormatString 注解的元素
+        for (Element element : roundEnv.getElementsAnnotatedWith(FormatString.class)) {
             JCTree jcTree = trees.getTree(element);
+
             jcTree.accept(new TreeTranslator() {
 
                 @Override
-                public void visitApply(JCTree.JCMethodInvocation methodInvocation) {
+                public void visitLiteral(JCTree.JCLiteral jcLiteral) {
 
-                    JCTree.JCExpression select = methodInvocation.getMethodSelect();
-                    if ("io.qaralotte.meru.utils.StringUtils.format".equals(select.toString()) ||
-                        "StringUtils.format".equals(select.toString())) {
+                    if (jcLiteral.getKind() == Tree.Kind.STRING_LITERAL) {
+                        JCTree.JCExpression expression = parseFormatString(jcLiteral.value.toString());
 
-                        // 只有一个参数，而且必须是 String 类型
-                        JCTree.JCExpression argExpr = methodInvocation.args.get(0);
-                        methodInvocation.args = List.of(parseArg(argExpr));
+                        expression.accept(new TreeTranslator());
+                        result = expression;
+
+                        // super.visitLiteral(jcLiteral);
+                    } else {
+                        super.visitLiteral(jcLiteral);
                     }
-
-                    super.visitApply(methodInvocation);
                 }
+
             });
         }
 
