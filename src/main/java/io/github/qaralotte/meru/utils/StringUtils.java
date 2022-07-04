@@ -1,4 +1,4 @@
-package io.qaralotte.meru.utils;
+package io.github.qaralotte.meru.utils;
 
 public class StringUtils {
 
