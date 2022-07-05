@@ -17,8 +17,6 @@ import javax.lang.model.element.TypeElement;
 import javax.tools.Diagnostic;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @SupportedAnnotationTypes("io.github.qaralotte.meru.annotation.FormatString")
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
@@ -90,8 +88,7 @@ public class FormatStringProcessor extends BaseProcessor {
         } else if (expression.isStringLiteralExpr()) {
             // 字符串
             StringLiteralExpr expr = expression.asStringLiteralExpr();
-            // todo 或许还需要进一步处理 format
-            return treeMaker.Literal(expr.asString());
+            return parseStringLiteral(expr.asString());
         } else if (expression.isNameExpr()) {
             // 变量
             NameExpr expr = expression.asNameExpr();
@@ -113,7 +110,7 @@ public class FormatStringProcessor extends BaseProcessor {
             MethodCallExpr expr = expression.asMethodCallExpr();
 
             // 如果未显式声明调用方, 那么一定是当前类里的方法
-            String scope = expr.getScope().isPresent() ? expr.getScope().toString() : "this";
+            String scope = expr.getScope().isPresent() ? expr.getScope().get().toString() : "this";
 
             // 参数列表
             ListBuffer<JCTree.JCExpression> args = new ListBuffer<>();
@@ -158,7 +155,10 @@ public class FormatStringProcessor extends BaseProcessor {
      * @param exprStr 表达式字符串
      * @return 表达式 ast.node
      */
-    private JCTree.JCExpression parseExpressionString(String exprStr) {
+    private JCTree.JCExpression parseExprStringLiteral(String exprStr) {
+
+        // 表达式内反引号当引号使用 (谁想看到成片的反斜杠？)
+        exprStr = exprStr.replace("`", "\"");
 
         JavaParser javaParser = new JavaParser();
         ParseResult<Expression> parseExpression = javaParser.parseExpression(exprStr);
@@ -178,66 +178,93 @@ public class FormatStringProcessor extends BaseProcessor {
      * @param lit 需要格式化的字符串，{} 内的字符串需要处理成表达式 (parseExpressionString)
      * @return 表达式 ast.node
      */
-    private JCTree.JCExpression parseFormatString(String lit) {
-
+    private JCTree.JCExpression parseStringLiteral(String lit) {
         // 如果字面量是空字符串，直接返回空字符串
         if (lit.isEmpty()) return treeMaker.Literal("");
 
-        // 找出所有 {} 之内的字符串
-        Matcher matcher = Pattern.compile("\\{.*?}").matcher(lit);
+        JCTree.JCExpression finalExpr = null;
+
+        // 在占位符之前的字符串位置
         int lastEnd = 0;
-        JCTree.JCExpression resultExpression = null;
+        for (int i = 0; i < lit.length(); i++) {
 
-        // 如果匹配到结果，则开始处理格式化
-        while (matcher.find()) {
-            int start = matcher.start();
-            int end = matcher.end();
+            // 如果遇到 '{' 代表进入下一层
+            if (lit.charAt(i) == '{') {
+                // 前面未格式化的字符串
+                JCTree.JCLiteral beforeLit = treeMaker.Literal(lit.substring(lastEnd, i));
 
-            // 开始处理格式化变量
-            JCTree.JCExpression formatExpression;
-            String expr = lit.substring(start + 1, end - 1);
-            formatExpression = parseExpressionString(expr);
+                // 向后找配对的 '}'
+                int level = 0;
+                for (int j = i + 1; j < lit.length(); j++) {
+                    // 如果有嵌套的占位符，层数 + 1
+                    if (lit.charAt(j) == '{') level += 1;
+                    if (lit.charAt(j) == '}') {
+                        // 如果层数 = 0, 则代表配对成功
+                        // 开始处理占位符内的内容
+                        if (level == 0) {
+                            String placeholder = lit.substring(i + 1, j);
+                            JCTree.JCExpression expression = parseExprStringLiteral(placeholder);
 
-            // 上一个 end 到这一次 start 之间的字符串正常处理
-            String lastEndToStart = lit.substring(lastEnd, start);
-            JCTree.JCLiteral lastLiteral = treeMaker.Literal(lastEndToStart);
+                            // 将前面字面量部分和表达式部分相加
+                            if (finalExpr == null) {
+                                // 如果之前并没有任何相加语句，则这个是第一次相加
+                                finalExpr = treeMaker.Binary(
+                                        JCTree.Tag.PLUS,
+                                        beforeLit,
+                                        expression
+                                );
+                            } else {
+                                // 如果之前有相加语句，则与之前的语句进行相加
+                                finalExpr = treeMaker.Binary(
+                                        JCTree.Tag.PLUS,
+                                        finalExpr,
+                                        treeMaker.Binary(
+                                                JCTree.Tag.PLUS,
+                                                beforeLit,
+                                                expression
+                                        )
+                                );
+                            }
 
-            // 将字符串与变量相加
-            JCTree.JCExpression lastEndToStartExpr = treeMaker.Binary(
-                    JCTree.Tag.PLUS,
-                    lastLiteral,
-                    formatExpression
-            );
-
-            lastEnd = end;
-
-            if (resultExpression == null) {
-                // 如果之前并没有任何相加语句，则这个是第一次相加
-                resultExpression = lastEndToStartExpr;
-            } else {
-                // 如果之前有相加语句，则与之前的语句进行相加
-                resultExpression = treeMaker.Binary(
-                        JCTree.Tag.PLUS,
-                        resultExpression,
-                        lastEndToStartExpr
-                );
+                            // 从下一个字符继续开始循环
+                            i = j;
+                            lastEnd = j + 1;
+                            break;
+                        }
+                    }
+                }
             }
         }
 
         // 在最后可能还有字符串，需要再添加进来
         if (lastEnd < lit.length()) {
-            if (resultExpression == null) {
-                resultExpression = treeMaker.Literal(lit.substring(lastEnd));
+            if (finalExpr == null) {
+                finalExpr = treeMaker.Literal(lit.substring(lastEnd));
             } else {
-                resultExpression = treeMaker.Binary(
+                finalExpr = treeMaker.Binary(
                         JCTree.Tag.PLUS,
-                        resultExpression,
+                        finalExpr,
                         treeMaker.Literal(lit.substring(lastEnd))
                 );
             }
         }
 
-        return resultExpression;
+        return finalExpr;
+    }
+
+    /**
+     * 检查模版字符串格式是否正确
+     * @param lit 模版字符串
+     * @return 是否正确
+     */
+    private boolean checkIsCorrect(String lit) {
+        int level = 0;
+        for (int i = 0; i < lit.length(); i++) {
+            if (level < 0) return false;
+            if (lit.charAt(i) == '{') level += 1;
+            if (lit.charAt(i) == '}') level -= 1;
+        }
+        return level == 0;
     }
 
     @Override
@@ -253,7 +280,15 @@ public class FormatStringProcessor extends BaseProcessor {
                 public void visitLiteral(JCTree.JCLiteral jcLiteral) {
 
                     if (jcLiteral.getKind() == Tree.Kind.STRING_LITERAL) {
-                        JCTree.JCExpression expression = parseFormatString(jcLiteral.value.toString());
+
+                        String lit = jcLiteral.value.toString();
+
+                        if (!checkIsCorrect(lit)) {
+                            messager.printMessage(Diagnostic.Kind.ERROR, "不合法的模版字符串: " + lit);
+                            return;
+                        }
+
+                        JCTree.JCExpression expression = parseStringLiteral(lit);
 
                         expression.accept(new TreeTranslator());
                         result = expression;
