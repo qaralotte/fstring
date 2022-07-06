@@ -8,7 +8,7 @@
 <dependency>
     <groupId>io.github.qaralotte</groupId>
     <artifactId>meru</artifactId>
-    <version>0.0.3-ALPHA</version>
+    <version>1.0.0</version>
 </dependency>
 ````
 
