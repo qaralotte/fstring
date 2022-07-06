@@ -1,4 +1,4 @@
-package io.qaralotte.meru.processor;
+package io.github.qaralotte.meru.processor;
 
 import com.sun.tools.javac.api.JavacTrees;
 import com.sun.tools.javac.processing.JavacProcessingEnvironment;
