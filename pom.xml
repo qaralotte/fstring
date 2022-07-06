@@ -6,7 +6,7 @@
 
     <groupId>io.github.qaralotte</groupId>
     <artifactId>meru</artifactId>
-    <version>0.0.2-ALPHA</version>
+    <version>0.0.3-ALPHA</version>
 
     <name>${project.groupId}:${project.artifactId}</name>
     <description>一个简单的 java 工具库</description>

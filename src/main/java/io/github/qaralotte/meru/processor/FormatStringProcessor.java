@@ -23,17 +23,19 @@ import java.util.Set;
 public class FormatStringProcessor extends BaseProcessor {
 
     /*
-      1            -> 整数
-      1.14514      -> 浮点数
-      'h'          -> 字符
-      "1"          -> 字符串
-      a            -> 变量
-      "1" + a      -> 二元运算
-      A.call()     -> 方法调用
-      A.b          -> 成员调用
-      arr[i]       -> 数组索引
-      (String) a   -> 类型转换
-      null         -> 空指针
+      1                 -> 整数
+      1.14514           -> 浮点数
+      'h'               -> 字符
+      "1"               -> 字符串
+      true              -> 布尔值
+      a                 -> 变量
+      "1" + a           -> 二元表达式
+      a == b ? a : b    -> 三元表达式
+      A.call()          -> 方法调用
+      A.b               -> 成员调用
+      arr[i]            -> 数组索引
+      (String) a        -> 类型转换
+      null              -> 空指针
      */
 
     /**
@@ -89,18 +91,30 @@ public class FormatStringProcessor extends BaseProcessor {
             // 字符串
             StringLiteralExpr expr = expression.asStringLiteralExpr();
             return parseStringLiteral(expr.asString());
+        } else if (expression.isBooleanLiteralExpr()) {
+            // 布尔值
+            BooleanLiteralExpr expr = expression.asBooleanLiteralExpr();
+            return treeMaker.Literal(expr.getValue());
         } else if (expression.isNameExpr()) {
             // 变量
             NameExpr expr = expression.asNameExpr();
             return treeMaker.Ident(names.fromString(expr.getNameAsString()));
         } else if (expression.isBinaryExpr()) {
-            // 二元运算
+            // 二元表达式
             BinaryExpr expr = expression.asBinaryExpr();
             JCTree.Tag operation = convertOperation(expr.getOperator());
             return treeMaker.Binary(
                     operation,
                     parseExpression(expr.getLeft()),
                     parseExpression(expr.getRight())
+            );
+        } else if (expression.isConditionalExpr()) {
+            // 三元表达式
+            ConditionalExpr expr = expression.asConditionalExpr();
+            return treeMaker.Conditional(
+                    parseExpression(expr.getCondition()),
+                    parseExpression(expr.getThenExpr()),
+                    parseExpression(expr.getElseExpr())
             );
         } else if (expression.isEnclosedExpr()) {
             // 括号优先
