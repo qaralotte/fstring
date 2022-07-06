@@ -13,8 +13,10 @@ import io.github.qaralotte.meru.annotation.FormatString;
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
+import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.TypeElement;
 import javax.tools.Diagnostic;
+import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 
@@ -284,36 +286,67 @@ public class FormatStringProcessor extends BaseProcessor {
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
 
+        // 检索树下所有的字符串字面量
+        TreeTranslator formatTranslator = new TreeTranslator() {
+            @Override
+            public void visitLiteral(JCTree.JCLiteral jcLiteral) {
+
+                // 只处理字符串字面量
+                if (jcLiteral.getKind() == Tree.Kind.STRING_LITERAL) {
+
+                    String lit = jcLiteral.value.toString();
+
+                    // 检查是否是合法的模版字符串
+                    if (!checkIsCorrect(lit)) {
+                        messager.printMessage(Diagnostic.Kind.ERROR, "不合法的模版字符串: " + lit);
+                        return;
+                    }
+
+                    // 处理模版字符串
+                    JCTree.JCExpression expression = parseStringLiteral(lit);
+
+                    // 将原本的字符串替换成模版后的表达式
+                    expression.accept(new TreeTranslator());
+                    result = expression;
+
+                    // super.visitLiteral(jcLiteral);
+                } else {
+                    super.visitLiteral(jcLiteral);
+                }
+            }
+        };
+
+        // 已处理方法集合
+        HashSet<JCTree> parsedMethods = new HashSet<>();
+
         // 处理有 @FormatString 注解的元素
         for (Element element : roundEnv.getElementsAnnotatedWith(FormatString.class)) {
             JCTree jcTree = trees.getTree(element);
 
-            jcTree.accept(new TreeTranslator() {
+            if (element.getKind() == ElementKind.CLASS) {
+                // 如果是类上的注解，则代表需要处理类里所有的模版字符串
+                jcTree.accept(new TreeTranslator() {
 
-                @Override
-                public void visitLiteral(JCTree.JCLiteral jcLiteral) {
+                    // 遍历一遍所有的方法
+                    @Override
+                    public void visitMethodDef(JCTree.JCMethodDecl jcMethodDecl) {
 
-                    if (jcLiteral.getKind() == Tree.Kind.STRING_LITERAL) {
+                        jcMethodDecl.accept(formatTranslator);
 
-                        String lit = jcLiteral.value.toString();
+                        // 将方法名写入已处理方法集合里
+                        parsedMethods.add(jcMethodDecl);
 
-                        if (!checkIsCorrect(lit)) {
-                            messager.printMessage(Diagnostic.Kind.ERROR, "不合法的模版字符串: " + lit);
-                            return;
-                        }
-
-                        JCTree.JCExpression expression = parseStringLiteral(lit);
-
-                        expression.accept(new TreeTranslator());
-                        result = expression;
-
-                        // super.visitLiteral(jcLiteral);
-                    } else {
-                        super.visitLiteral(jcLiteral);
+                        super.visitMethodDef(jcMethodDecl);
                     }
-                }
+                });
+            } else {
+                // 如果已处理方法集合里包含了对象，则直接跳过不执行
+                if (parsedMethods.contains(jcTree)) continue;
 
-            });
+                jcTree.accept(formatTranslator);
+                parsedMethods.add(jcTree);
+            }
+
         }
 
         return false;
