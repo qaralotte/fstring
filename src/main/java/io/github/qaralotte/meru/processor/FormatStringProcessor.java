@@ -125,8 +125,10 @@ public class FormatStringProcessor extends BaseProcessor {
             // 方法调用
             MethodCallExpr expr = expression.asMethodCallExpr();
 
-            // 如果未显式声明调用方, 那么一定是当前类里的方法
-            String scope = expr.getScope().isPresent() ? expr.getScope().get().toString() : "this";
+            // 如果未显式声明调用方, 那么一定是当前类里的方法 (this)
+            JCTree.JCExpression scope;
+            if (!expr.getScope().isPresent()) scope = treeMaker.Ident(names._this);
+            else scope = parseExpression(expr.getScope().get());
 
             // 参数列表
             ListBuffer<JCTree.JCExpression> args = new ListBuffer<>();
@@ -136,7 +138,7 @@ public class FormatStringProcessor extends BaseProcessor {
 
             return treeMaker.Apply(
                     List.nil(),
-                    memberAccess(scope + "." + expr.getNameAsString()),
+                    treeMaker.Select(scope, names.fromString(expr.getNameAsString())),
                     args.toList()
             );
         } else if (expression.isFieldAccessExpr()) {
