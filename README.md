@@ -4,7 +4,7 @@ Format-String in compile-time
 
 ## Installation
 
-Currently, only JDK 1.8 is supported
+JDK 8 above
 
 ```` xml
 <dependency>
@@ -71,5 +71,5 @@ System.out.println("hello {`{myTestFunc(123, 456)}`} world");
 
 ## License
 
-Format-String complies is released under the [Apache](https://github.com/qaralotte/fstring/blob/master/LICENSE.APACHE)
+Format-String complies is released under the [Apache](https://github.com/qaralotte/fstring/blob/master/LICENSE)
 
