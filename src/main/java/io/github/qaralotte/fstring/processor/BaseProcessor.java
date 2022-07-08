@@ -1,4 +1,4 @@
-package io.github.qaralotte.meru.processor;
+package io.github.qaralotte.fstring.processor;
 
 import com.sun.tools.javac.api.JavacTrees;
 import com.sun.tools.javac.processing.JavacProcessingEnvironment;
@@ -57,14 +57,5 @@ public abstract class BaseProcessor extends AbstractProcessor {
         Context context = ((JavacProcessingEnvironment) processingEnv).getContext();
         this.treeMaker = TreeMaker.instance(context);
         this.names = Names.instance(context);
-    }
-
-    public JCTree.JCExpression memberAccess(String components) {
-        String[] componentArray = components.split("\\.");
-        JCTree.JCExpression expr = treeMaker.Ident(names.fromString(componentArray[0]));
-        for (int i = 1; i < componentArray.length; i++) {
-            expr = treeMaker.Select(expr, names.fromString(componentArray[i]));
-        }
-        return expr;
     }
 }

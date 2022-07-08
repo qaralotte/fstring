@@ -1,4 +1,4 @@
-package io.github.qaralotte.meru.processor;
+package io.github.qaralotte.fstring.processor;
 
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
@@ -8,7 +8,7 @@ import com.sun.tools.javac.tree.JCTree;
 import com.sun.tools.javac.tree.TreeTranslator;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.ListBuffer;
-import io.github.qaralotte.meru.annotation.FormatString;
+import io.github.qaralotte.fstring.annotation.FormatString;
 
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
@@ -20,7 +20,7 @@ import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 
-@SupportedAnnotationTypes("io.github.qaralotte.meru.annotation.FormatString")
+@SupportedAnnotationTypes("io.github.qaralotte.fstring.annotation.FormatString")
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
 public class FormatStringProcessor extends BaseProcessor {
 
